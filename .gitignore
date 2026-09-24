@@ -1,0 +1,16 @@
+node_modules/
+*.log
+*.tmp
+tools/.e2e-workspace/
+
+# ── 以下为内部过程记录与真机证据，不入公开仓库 ──
+# 原因：含真实会话原文、个人机器路径、bot 标识与密钥引用名
+docs/research-notes/
+docs/night-shift-report.md
+docs/probe-validation-report.md
+docs/probe-validation-heartbeat.log
+docs/red-team-report.md
+docs/qq-live-test-guide.md
+docs/真机测试-手把手.md
+docs/命令真机走查-手把手.md
+天枢IM插件-交接prompt.md
