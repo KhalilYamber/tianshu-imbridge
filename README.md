@@ -25,7 +25,7 @@
   - 由此证实的原设计关键假设：插件运行在 serve 进程内时**能**读到 `RIVET_SERVER_TOKEN`
     （此前为推断、未实测）；端口来自 argv，每次启动都变（本机实测两次：26177 / 43324）
 - 工作区：QQ 会话默认进入配置项 `workspace`（当前为 `D:\path\to\bridge天枢默认`）
-- 测试：**单元测试全绿**（`node --test`，当前 230 例）
+- 测试：**单元测试全绿**（`node --test`，当前 249 例）
 - **红队审查 + 修复**（2026-09-24）：对 serve 通道做对抗测试，修掉四处实跑复现的缺陷——
   ① 会话 404 重建后沿用死游标（事件被 `e.seq > since` 全过滤 → 空转成假超时）；
   ② 快照接口任何非 200 都被当成「会话已删除」→ 一次 500 就静默清掉持久绑定；
@@ -37,13 +37,16 @@
 - **ponytail 过度设计审计**（2026-09-24）：删掉两处零生产调用者的死代码——`serve-client.mjs`
   的 `extractReplyText` 导出、`tianshu.mjs` 的 `resumeId` 选项与 `-r` 分支。
   详见下方「未采纳的简化」一节。
+- **im_status 悬空引用修复**（2026-09-24）：工具曾引用未定义的 `sessionMapCache`，调用必抛
+  ReferenceError；已改为读绑定表落盘条目数（`session-map.json`），并补入口级回归测试
+  `test/plugin-entry.test.mjs`。
 - 已知小项（非阻塞）：`im_status` 顶层 `connection` 显示字段与内部实时状态轻微不同步
 - 社区查重：完成，见 `docs/prior-art-survey.md`（无等价轮子；DSH 侧有先例）
 - **命令层（工作区 / 会话 / 历史）**：`/workspacelist`、`/workspace`、`/sessions`、`/session`、`/history`
   五个命令已接进消息桥（命中命令时不调用模型）。依据与实测记录：`docs/command-mapping.md`、
   `docs/research-notes/serve-endpoints-20260924.txt`、`serve-event-reconstruction-20260924.txt`、
   `transcript-verification-20260924.md`、`history-verification-20260924.md`。
-  离线验收：单测 230 例全绿；`/history` 对隔离实例 e2e 10/10。**手机 QQ 真机走查待办**。
+  离线验收：单测 249 例全绿；`/history` 对隔离实例 e2e 10/10。**手机 QQ 真机走查待办**。
 
 ## ⚠️ 安全边界：`ownerUserOpenid` 建议必填
 

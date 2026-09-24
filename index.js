@@ -215,6 +215,14 @@ export const tools = [
         const { probeServerEnv } = await import('./lib/serve-client.mjs')
         serveAvailable = probeServerEnv().available
       } catch { /* ignore */ }
+      // 会话绑定数：读落盘事实（与桥共用同一按路径缓存），桥未建时也能如实报告
+      let sessionMapSize = 0
+      try {
+        const { pluginDataDir } = await import('./lib/qq/config.mjs')
+        sessionMapSize = makeSessionMap(join(pluginDataDir(process.env), 'session-map.json')).size()
+      } catch (error) {
+        logger.warn('im_status: 会话绑定表读取失败:', error?.message ?? error)
+      }
       return {
         content: JSON.stringify(
           {
@@ -226,7 +234,7 @@ export const tools = [
             connection: state.connection,
             connectionDetail: connection?.status ?? null,
             bridgeStats: bridge?.stats ?? null,
-            sessionMapSize: sessionMapCache ? Object.keys(sessionMapCache).length : 0,
+            sessionMapSize,
             maskedAppId: state.maskedAppId,
             configSource: state.configSource,
             configFile: state.configFile,
