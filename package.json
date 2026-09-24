@@ -2,6 +2,7 @@
   "name": "tianshu-imbridge",
   "version": "0.4.0",
   "description": "Tianshu IM bridge plugin — mobile QQ messages flow directly into Tianshu and replies go straight back to QQ (no DSH relay in between).",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,6 +17,10 @@
       {
         "name": "im_status",
         "description": "Report the IM bridge status: phase, process info, connection state"
+      },
+      {
+        "name": "im_send",
+        "description": "Send a proactive QQ message to the owner (notification)"
       }
     ],
     "permissions": {
