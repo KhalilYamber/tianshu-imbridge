@@ -1,5 +1,5 @@
 {
-  "name": "tianshu-im-qq",
+  "name": "tianshu-imbridge",
   "version": "0.4.0",
   "description": "Tianshu IM bridge plugin — mobile QQ messages flow directly into Tianshu and replies go straight back to QQ (no DSH relay in between).",
   "private": true,
@@ -8,7 +8,7 @@
     "test": "node --test"
   },
   "tianshu": {
-    "name": "tianshu-im-qq",
+    "name": "tianshu-imbridge",
     "version": "0.4.0",
     "description": "Mobile QQ <-> Tianshu direct bridge: plugin residency + QQ channel + headless call + reply routing",
     "entry": "index.js",

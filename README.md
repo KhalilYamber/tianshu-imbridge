@@ -1,4 +1,4 @@
-# tianshu-im-qq
+# tianshu-imbridge
 
 天枢（Tianshu Harness）的 IM 插件（QQ 渠道，开发中）。
 
@@ -21,7 +21,7 @@
   - 消息流：`[bridge] serve 新建会话 2026092437d1b4` → `serve → 会话（13 字）` → `serve ← 回复已发送（9 字）`
   - 桌面端会话目录多出该会话，标题 `QQ: 请说"现在是 11:13"`，工作区 `bridge天枢默认`，
     会话内一轮问答完整（用户消息 → 回复「现在是 11:13」）
-  - 绑定表落盘：`im-qq/session-map.json` → `{"c2c:D939…4B0（脱敏）": "2026092437d1b4997aec"}`
+  - 绑定表落盘：`imbridge/session-map.json` → `{"c2c:D939…4B0（脱敏）": "2026092437d1b4997aec"}`
   - 由此证实的原设计关键假设：插件运行在 serve 进程内时**能**读到 `RIVET_SERVER_TOKEN`
     （此前为推断、未实测）；端口来自 argv，每次启动都变（本机实测两次：26177 / 43324）
 - 工作区：QQ 会话默认进入配置项 `workspace`（当前为 `D:\path\to\bridge天枢默认`）
@@ -72,7 +72,7 @@ QQ 侧未配置 `ownerUserOpenid` 时**默认放行所有私聊**，而机器人
 
 ```mermaid
 flowchart LR
-  QQ["手机 QQ"] -->|消息| P["tianshu-im-qq<br/>（运行在 serve 进程内）"]
+  QQ["手机 QQ"] -->|消息| P["tianshu-imbridge<br/>（运行在 serve 进程内）"]
   P -->|"serve 可用<br/>token + --port"| S["serve 原生会话<br/>POST /sessions<br/>POST /sessions/:id/prompt<br/>GET /sessions/:id/events"]
   P -->|"serve 不可用<br/>TUI / 独立进程"| H["headless 调用<br/>-p --json<br/>+ 客户端历史注入"]
   S --> D["桌面端会话目录可见"]
@@ -83,7 +83,7 @@ flowchart LR
 
 - **serve 原生会话模式（优先）**：插件与 serve 同进程运行，可从
   `process.env.RIVET_SERVER_TOKEN` 与 `--port`（argv）探测到本机 serve。
-  每个 QQ 对话线（`c2c:<openid>` / `group:<gid>`）在 `im-qq/session-map.json` 里
+  每个 QQ 对话线（`c2c:<openid>` / `group:<gid>`）在 `imbridge/session-map.json` 里
   绑定一个 serve 会话：首条消息 `POST /sessions` 建会话（桌面端立刻可见），
   后续消息 `POST /sessions/:id/prompt`，回复从 `GET /sessions/:id/events` 轮询收集。
   **多轮上下文由会话自身维护**，客户端不再注入历史。
@@ -171,7 +171,7 @@ QQ 里发命令即用：命令**由插件本地处理，不送给模型**（命�
   运行期间排队送入的输入标「运行中排队送入」；更早内容不在宿主返回的窗口内时会单独说明。
 - **默认 3 与上限 5 这两个数字**借自 dsh-im 的形；其源码未随本仓库分发，仓库内无法复核。
 - **命令提示（可发现性）**：第一次用到某条命令时，回执末尾附上该命令的用法与例子，并把「已教过」记进
-  `<RIVET_HOME>/im-qq/command-hints.json`；此后只附一行「`/help` 看全部命令」。未知命令回的就是帮助卡片，
+  `<RIVET_HOME>/imbridge/command-hints.json`；此后只附一行「`/help` 看全部命令」。未知命令回的就是帮助卡片，
   不再重复附提示。处理器没有回执时什么都不发（提示不单独成条）。帮助文案只有一份来源（`lib/command.mjs` 的
   `COMMAND_USAGE`），`/help` 卡片与首次提示都从它生成。
 
@@ -203,7 +203,7 @@ QQ 里发命令即用：命令**由插件本地处理，不送给模型**（命�
 
 两种方式（环境变量优先）：
 
-1. 数据目录配置文件 `<RIVET_HOME>\im-qq\config.json`（推荐，分享友好）：
+1. 数据目录配置文件 `<RIVET_HOME>\imbridge\config.json`（推荐，分享友好）：
 
    ```json
    {
@@ -220,8 +220,8 @@ QQ 里发命令即用：命令**由插件本地处理，不送给模型**（命�
 
 ## 部署到天枢（开发机）
 
-1. 复制到插件目录：把本目录复制为 `<RIVET_HOME>/plugins/tianshu-im-qq/`
-   （本机为 `<RIVET_HOME>\plugins\tianshu-im-qq\`），
+1. 复制到插件目录：把本目录复制为 `<RIVET_HOME>/plugins/tianshu-imbridge/`
+   （本机为 `<RIVET_HOME>\plugins\tianshu-imbridge\`），
    并在插件目录执行 `npm install --omit=dev`（安装 `@tencent-connect/qqbot-nodejs`）。
 2. 或安装 API（可热加载）：`POST /plugins/install`，
    body：`{"source":{"kind":"local","path":"<本目录绝对路径>"},"confirm":true}`

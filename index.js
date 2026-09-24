@@ -1,5 +1,5 @@
 /**
- * tianshu-im-qq — 天枢 IM 插件（QQ 渠道）· W5（桌面端原生会话）
+ * tianshu-imbridge — 天枢 IM 插件（QQ 渠道）· W5（桌面端原生会话）
  *
  * 目标：手机 QQ 消息直接进入天枢、天枢回复直接回到 QQ，中间不经 DSH；
  * 且每个 QQ 对话线以「桌面端原生会话」形式可见（模仿 dsh-im 的会话绑定做法）。
@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { makeSessionMap } from './lib/session-map.mjs'
 import { join } from 'node:path'
 
-const PLUGIN_NAME = 'tianshu-im-qq'
+const PLUGIN_NAME = 'tianshu-imbridge'
 const VERSION = '0.4.0'
 const TIANSHU_TIMEOUT_MS = 180_000
 
@@ -206,7 +206,7 @@ export const tools = [
   {
     definition: {
       name: 'im_status',
-      description: 'Report tianshu-im-qq status: phase, mode (serve-native/headless), QQ connection, session map, inbound/reply stats',
+      description: 'Report tianshu-imbridge status: phase, mode (serve-native/headless), QQ connection, session map, inbound/reply stats',
       input_schema: { type: 'object', properties: {} },
     },
     execute: async () => {

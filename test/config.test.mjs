@@ -6,12 +6,12 @@ import { join } from 'node:path'
 import { loadQqConfig, maskAppId, pluginDataDir } from '../lib/qq/config.mjs'
 
 test('pluginDataDir: RIVET_HOME 优先', () => {
-  assert.equal(pluginDataDir({ RIVET_HOME: 'D:/h/.rivet' }), join('D:/h/.rivet', 'im-qq'))
+  assert.equal(pluginDataDir({ RIVET_HOME: 'D:/h/.rivet' }), join('D:/h/.rivet', 'imbridge'))
 })
 
 function makeHome(config) {
   const home = mkdtempSync(join(tmpdir(), 'cfg-'))
-  const dir = join(home, 'im-qq')
+  const dir = join(home, 'imbridge')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'config.json'), JSON.stringify(config))
   return home

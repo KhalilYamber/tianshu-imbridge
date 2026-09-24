@@ -20,7 +20,7 @@
 - **端点**：无专用端点；`GET /sessions` 仅作交叉校验。
 - **字段**：枚举根下的目录名（编号即序号）；校验用 `GET /sessions` → `sessions[].cwd`。
 - **数据来源**：文件系统目录枚举。枚举根 = **插件配置项 `workspace` 的父目录**（插件自己的配置文件
-  `<RIVET_HOME>/im-qq/config.json`；本机 `workspace=D:\path\to\bridge天枢默认` → 根 `D:\path\to`。
+  `<RIVET_HOME>/imbridge/config.json`；本机 `workspace=D:\path\to\bridge天枢默认` → 根 `D:\path\to`。
   注意宿主主配置 `<RIVET_HOME>/config.json` 里的 `workspace` 是空对象，不是这个值）。
 - **排除规则**：只排除 **①点开头的隐藏项 ②非目录**。实测：裸枚举得 4 项，其中 `.rivet`
   （内含 `knowledge/`、`meridian.db`）被隐藏项规则挡掉；滤除后才是 3 项。

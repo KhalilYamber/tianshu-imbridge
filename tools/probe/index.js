@@ -1,4 +1,4 @@
-// TEMPORARY residency probe plugin (tianshu-im-qq task, phase: detection)
+// TEMPORARY residency probe plugin (tianshu-imbridge task, phase: detection)
 // Purpose: verify plugin module toplevel executes exactly once per process,
 // heartbeats keep running while process lives, and no double-write happens
 // when multiple sessions exist in the same process.
