@@ -336,3 +336,113 @@ test('绑定后下一条消息进入被绑会话（真实绑定表 + 桥 + 落�
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// ── 编号一致性回归（2026-09-25，大局观审视）──────────────────
+// 隐患：/sessions <工作区序号> 的过滤视图曾按「过滤后序号」重排显示（1、2、3…），
+// 而 /session 的编号解析按「全量清单」——两者不一致时，用户按看到的编号绑定
+// 会绑到别的会话。修复方向：过滤视图沿用全量编号（条目自带 index），使
+// 「显示的编号 = /session 接受的编号」恒成立。
+
+test('listSessions: 过滤视图的条目携带全量编号（index）', async () => {
+  const sessions = [
+    raw({ id: 'A', title: '甲', cwd: 'D:/path/to/coding', updatedAt: 3 }),
+    raw({ id: 'B', title: '乙', cwd: 'D:/path/to/日常', updatedAt: 2 }),
+    raw({ id: 'C', title: '丙', cwd: 'D:/path/to/coding', updatedAt: 1 }),
+  ]
+  const wsFs = {
+    readdirSync: () => [
+      { name: 'bridge天枢默认', isDirectory: () => true },
+      { name: 'coding', isDirectory: () => true },
+      { name: '日常', isDirectory: () => true },
+    ],
+  }
+  const full = await listSessions({
+    serveClient: serveStub(sessions),
+    workspace: 'D:\\path\\to\\bridge天枢默认',
+    fsImpl: wsFs,
+  })
+  assert.deepEqual(full.items.map((x) => x.index), [1, 2, 3], '全量视图编号连续')
+
+  const filtered = await listSessions({
+    serveClient: serveStub(sessions),
+    workspace: 'D:\\path\\to\\bridge天枢默认',
+    workspaceIndex: 2, // coding
+    fsImpl: wsFs,
+  })
+  assert.deepEqual(filtered.items.map((x) => x.id), ['A', 'C'])
+  assert.deepEqual(
+    filtered.items.map((x) => x.index),
+    [1, 3],
+    '过滤后必须保留全量编号：丙 在完整清单里是第 3 个，不是第 2 个',
+  )
+})
+
+test('formatSessionList: 用条目自带编号显示；编号不连续时附一行说明', () => {
+  const items = normalizeSessions([
+    raw({ id: 'A', title: '甲', cwd: 'D:/path/to/coding', updatedAt: 3 }),
+    raw({ id: 'C', title: '丙', cwd: 'D:/path/to/coding', updatedAt: 1 }),
+  ])
+  items[0].index = 1
+  items[1].index = 3
+  const r = formatSessionList(items, { scopeNote: '，限于工作区「coding」' })
+  assert.match(r.text, /^1\. 甲/m)
+  assert.match(r.text, /^3\. 丙/m, '显示的编号应是全量编号（3），不是行序（2）')
+  assert.ok(!/^2\. /m.test(r.text), '没有第 2 条就不该出现 2 号')
+  assert.match(r.text, /编号为完整清单中的位置/, '应解释编号为何跳跃')
+})
+
+test('formatSessionList: 全量（编号连续）时不附加说明，行为与旧版一致', () => {
+  const items = normalizeSessions([
+    raw({ id: 'S1', title: '甲', updatedAt: 2 }),
+    raw({ id: 'S2', title: '乙', updatedAt: 1, cwd: 'D:\\path\\to\\日常' }),
+  ])
+  const r = formatSessionList(items, {})
+  assert.match(r.lines[1], /^1\. 甲（coding）$/)
+  assert.match(r.lines[2], /^2\. 乙（日常）$/)
+  assert.ok(!/完整清单中的位置/.test(r.text))
+})
+
+test('编号一致性（端到端）: /sessions <工作区> 显示的编号可直接用于 /session', async () => {
+  const sessions = [
+    raw({ id: 'A', title: '甲', cwd: 'D:/path/to/coding', updatedAt: 3 }),
+    raw({ id: 'B', title: '乙', cwd: 'D:/path/to/日常', updatedAt: 2 }),
+    raw({ id: 'C', title: '丙', cwd: 'D:/path/to/coding', updatedAt: 1 }),
+  ]
+  const wsFs = {
+    readdirSync: () => [
+      { name: 'bridge天枢默认', isDirectory: () => true },
+      { name: 'coding', isDirectory: () => true },
+      { name: '日常', isDirectory: () => true },
+    ],
+  }
+  // 第一步：/sessions 2 → 过滤视图（只有 coding 的甲、丙）
+  const listReplies = []
+  const listHandlers = createCommandHandlers({
+    serveClient: bindServe(sessions),
+    workspace: 'D:\\path\\to\\bridge天枢默认',
+    fsImpl: wsFs,
+    sessionMap: { get: () => null, set: () => {}, del: () => {}, size: () => 0 },
+  })
+  await dispatchCommand(
+    { parsed: parseCommand('/sessions 2'), key: 'c2c:u', reply: async (t) => { listReplies.push(t) } },
+    listHandlers,
+  )
+  const listText = listReplies[0]
+  const m = listText.match(/^(\d+)\. 丙/m)
+  assert.ok(m, `过滤视图应列出丙，实得：\n${listText}`)
+  const shownIndex = Number(m[1])
+
+  // 第二步：用「看到的编号」发 /session
+  const binds = []
+  const bindHandlers = createCommandHandlers({
+    serveClient: bindServe(sessions),
+    workspace: 'D:\\path\\to\\bridge天枢默认',
+    fsImpl: wsFs,
+    sessionMap: { get: () => null, set: (_k, v) => { binds.push(v) }, del: () => {}, size: () => 0 },
+  })
+  await dispatchCommand(
+    { parsed: parseCommand(`/session ${shownIndex}`), key: 'c2c:u', reply: async () => {} },
+    bindHandlers,
+  )
+  assert.deepEqual(binds, ['C'], `按显示编号 ${shownIndex} 绑定，应命中丙（C），不得错位到乙`)
+})
