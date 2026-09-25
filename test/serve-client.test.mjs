@@ -242,3 +242,166 @@ test('TurnAccumulator: 重复 feed 同一批事件幂等（seq 去重）', () =>
   acc.feed(batch, 10)
   assert.equal(acc.text(), 'AB')
 })
+
+// ── 交互事件：提问与审批（2026-09-25，QQ 桥交互闭环）──────────
+// 现场依据：user_question / approval_required / approval_resolved 三类事件
+// 来自真实会话档（2026-09-22 会话 20260922a9002241c88c / 2026092273ffc9e91f0a）。
+
+test('TurnAccumulator: user_question 被收集，questions() 带出', () => {
+  const acc = new TurnAccumulator({ graceMs: 100 })
+  acc.feed([
+    ev(1, 'text_delta', { text: 'A' }),
+    ev(2, 'user_question', {
+      toolUseId: 'c1',
+      questions: [{ id: 'q1', prompt: '选哪条？', options: ['甲', '乙'], allowMultiple: false }],
+    }),
+    ev(3, 'turn_complete', { isFinal: true }),
+  ], 0)
+  assert.equal(acc.questions().length, 1)
+  assert.equal(acc.questions()[0].questions[0].prompt, '选哪条？')
+  assert.equal(acc.isComplete(101), true)
+})
+
+test('TurnAccumulator: approval_required 记 pending，approval_resolved 移除', () => {
+  const acc = new TurnAccumulator({ graceMs: 100 })
+  acc.feed([ev(1, 'approval_required', { requestId: 'r1', toolName: 'bash', input: { command: 'x' } })], 0)
+  assert.equal(acc.pendingApprovals().length, 1)
+  assert.equal(acc.pendingApprovals()[0].toolName, 'bash')
+  assert.equal(acc.pendingSince(), 0)
+  acc.feed([ev(2, 'approval_resolved', { requestId: 'r1', decision: 'approve' })], 10)
+  assert.equal(acc.pendingApprovals().length, 0)
+  assert.equal(acc.pendingSince(), null, '清空后观察窗计时重置')
+})
+
+test('TurnAccumulator: 多个 approval 同时挂起都能带出', () => {
+  const acc = new TurnAccumulator({ graceMs: 100 })
+  acc.feed([
+    ev(1, 'approval_required', { requestId: 'r1', toolName: 'bash', input: {} }),
+    ev(2, 'approval_required', { requestId: 'r2', toolName: 'write_file', input: {} }),
+  ], 0)
+  assert.equal(acc.pendingApprovals().length, 2)
+  acc.feed([ev(3, 'approval_resolved', { requestId: 'r1', decision: 'approve' })], 5)
+  assert.deepEqual(acc.pendingApprovals().map((a) => a.requestId), ['r2'])
+  assert.equal(acc.pendingSince(), 0, '仍有未决项时计时不清零')
+})
+
+test('waitForReply: 审批挂起（观察窗内无 resolved）→ 提前返回 needInput', async () => {
+  await withKeepAlive(async () => {
+    const client = new ServeSessionClient({
+      token: 't',
+      port: 1,
+      fetchImpl: scriptedFetch([
+        {
+          events: [
+            ev(1, 'text_delta', { text: '准备执行' }),
+            ev(2, 'approval_required', { requestId: 'r1', toolName: 'bash', input: { command: 'echo hi' } }),
+          ],
+        },
+      ]),
+    })
+    const r = await client.waitForReply('s1', { since: 0, timeoutMs: 5000, graceMs: 0, pollMs: 1 })
+    assert.equal(r.timedOut, false, '审批挂起不是超时场景，不该干等到 180s')
+    assert.ok(r.needInput, '应带出 needInput')
+    assert.equal(r.needInput.approvals.length, 1)
+    assert.equal(r.needInput.approvals[0].requestId, 'r1')
+    assert.equal(r.text, '准备执行')
+    assert.deepEqual(r.questions, [])
+  })
+})
+
+test('waitForReply: 审批被快速 resolved → 不触发 needInput，正常完成', async () => {
+  await withKeepAlive(async () => {
+    const client = new ServeSessionClient({
+      token: 't',
+      port: 1,
+      fetchImpl: scriptedFetch([
+        {
+          events: [
+            ev(2, 'approval_required', { requestId: 'r1', toolName: 'bash', input: {} }),
+            ev(3, 'approval_resolved', { requestId: 'r1', decision: 'approve' }),
+            ev(4, 'text_delta', { text: '做完了' }),
+            ev(5, 'turn_complete', { isFinal: true }),
+          ],
+        },
+      ]),
+    })
+    const r = await client.waitForReply('s1', { since: 0, timeoutMs: 2000, graceMs: 0, pollMs: 1 })
+    assert.equal(r.needInput, null, '桌面端已在观察窗内处理，不该打扰 QQ')
+    assert.equal(r.timedOut, false)
+    assert.equal(r.text, '做完了')
+  })
+})
+
+test('waitForReply: 完成时带出 questions（提问卡片随回合完成返回）', async () => {
+  await withKeepAlive(async () => {
+    const client = new ServeSessionClient({
+      token: 't',
+      port: 1,
+      fetchImpl: scriptedFetch([
+        {
+          events: [
+            ev(1, 'text_delta', { text: '请您示下' }),
+            ev(2, 'user_question', {
+              toolUseId: 'c1',
+              questions: [{ id: 'q1', prompt: '选哪条？', options: ['甲', '乙'], allowMultiple: false }],
+            }),
+            ev(3, 'turn_complete', { isFinal: true }),
+          ],
+        },
+      ]),
+    })
+    const r = await client.waitForReply('s1', { since: 0, timeoutMs: 2000, graceMs: 0, pollMs: 1 })
+    assert.equal(r.timedOut, false)
+    assert.equal(r.questions.length, 1)
+    assert.equal(r.questions[0].questions[0].options[0], '甲')
+  })
+})
+
+test('answerIntervention: 提交 deny → URL 与 body 正确', async () => {
+  let captured = null
+  const client = new ServeSessionClient({
+    token: 't',
+    port: 1,
+    fetchImpl: async (url, init) => { captured = { url, init }; return json({ ok: true }) },
+  })
+  const r = await client.answerIntervention('s1', 'r1', { decision: 'deny' })
+  assert.equal(r.ok, true)
+  assert.match(captured.url, /\/sessions\/s1\/interventions\/r1\/answer$/)
+  assert.equal(captured.init.method, 'POST')
+  assert.deepEqual(JSON.parse(captured.init.body), { decision: 'deny' })
+})
+
+test('answerIntervention: 未提交 decision 时默认 approve（与宿主一致）', async () => {
+  let captured = null
+  const client = new ServeSessionClient({
+    token: 't',
+    port: 1,
+    fetchImpl: async (url, init) => { captured = { url, init }; return json({ ok: true }) },
+  })
+  await client.answerIntervention('s1', 'r1', {})
+  assert.deepEqual(JSON.parse(captured.init.body), { decision: 'approve' })
+})
+
+test('answerIntervention: 404 → intervention-not-found（已失效，调用方需清理等待态）', async () => {
+  const client = new ServeSessionClient({
+    token: 't',
+    port: 1,
+    fetchImpl: async () => json({ error: 'Pending intervention not found' }, 404),
+  })
+  await assert.rejects(
+    () => client.answerIntervention('s1', 'r1', { decision: 'approve' }),
+    (e) => e.code === 'intervention-not-found',
+  )
+})
+
+test('answerIntervention: 非 200 → answer-failed', async () => {
+  const client = new ServeSessionClient({
+    token: 't',
+    port: 1,
+    fetchImpl: async () => json({ error: 'boom' }, 500),
+  })
+  await assert.rejects(
+    () => client.answerIntervention('s1', 'r1', { decision: 'approve' }),
+    (e) => e.code === 'answer-failed',
+  )
+})

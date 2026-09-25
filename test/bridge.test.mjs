@@ -827,3 +827,269 @@ test('提示: 未注入记忆时不复述用法（只留一行）', async () => 
   await bridge.handle(seamMsg('/history'))
   assert.equal(sent[0], '回执\n\n（/help 看全部命令）')
 })
+
+// ── 交互闭环：提问与审批（2026-09-25）────────────────────────
+// 背景：QQ 桥对「等待用户选择」场景原本无处理路径——提问卡片（user_question）
+// 不转发；审批（approval_required）干等超时。现场依据：会话档
+// 20260922a9002241c88c（提问 seq 9700-9709）与 2026092273ffc9e91f0a（审批 seq 191-195）。
+
+const ixMsg = (content) => ({
+  kind: 'c2c',
+  senderId: 'ix-user',
+  content,
+  replyTarget: { scope: 'c2c', targetId: 'ix-user', msgId: `m-${content}` },
+})
+
+/** 自足的交互场景替身：waitForReply 按脚本逐次返回；记录 answerIntervention 调用。 */
+function makeIxServe(script) {
+  let n = 0
+  const state = { prompts: [], answers: [], failAnswer: null }
+  return {
+    state,
+    available: true,
+    async getSession(id) { return { id, lastSeq: 0 } },
+    async createSession() { return { id: 'S-IX' } },
+    async promptSession(id, text) { state.prompts.push({ id, text }) },
+    async waitForReply() {
+      const r = script[Math.min(n, script.length - 1)]
+      n += 1
+      return typeof r === 'function' ? r() : r
+    },
+    async answerIntervention(sessionId, requestId, opts) {
+      if (state.failAnswer) {
+        const mode = state.failAnswer
+        state.failAnswer = null
+        const error = mode === 'not-found'
+          ? Object.assign(new Error('Pending intervention not found'), { code: 'intervention-not-found' })
+          : Object.assign(new Error('HTTP 500'), { code: 'answer-failed' })
+        throw error
+      }
+      state.answers.push({ sessionId, requestId, ...opts })
+      return { ok: true }
+    },
+  }
+}
+
+const ixBridge = (serve, sent) => new ImBridge({
+  workspaceRoot: 'W:/ws',
+  logger: silentLogger,
+  ensureDir: () => {},
+  serveClient: serve,
+  sessionMap: regMap([['c2c:ix-user', 'S-IX']]),
+  call: async () => { throw new Error('交互测试：不应走 headless') },
+  send: async (_t, text) => { sent.push(text) },
+})
+
+const Q_CARD = {
+  toolUseId: 'c1',
+  questions: [{ id: 'q1', prompt: '选哪条？', options: ['甲', '乙', '丙'], allowMultiple: false }],
+}
+
+test('提问: 回合完成带问题卡片 → 选项被转发到 QQ', async () => {
+  const serve = makeIxServe([
+    { text: '请您示下', lastSeq: 5, timedOut: false, error: null, questions: [Q_CARD], needInput: null },
+  ])
+  const sent = []
+  await ixBridge(serve, sent).handle(ixMsg('干活'))
+  const body = sent.join('\n')
+  assert.match(body, /请您示下/)
+  assert.match(body, /选哪条？/)
+  assert.match(body, /1\. 甲/)
+  assert.match(body, /2\. 乙/)
+  assert.match(body, /3\. 丙/)
+  assert.match(body, /回复编号/)
+})
+
+test('提问: 之后回复编号 → 翻译为选项原文送入会话', async () => {
+  const serve = makeIxServe([
+    { text: '请您示下', lastSeq: 5, timedOut: false, error: null, questions: [Q_CARD], needInput: null },
+    { text: '好的', lastSeq: 9, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const sent = []
+  const bridge = ixBridge(serve, sent)
+  await bridge.handle(ixMsg('干活'))
+  await bridge.handle(ixMsg('2'))
+  assert.equal(serve.state.prompts.length, 2)
+  assert.equal(serve.state.prompts[1].text, '乙', '编号被翻译成选项原文')
+})
+
+test('提问: 越界编号原样送入（交给模型自己理解）', async () => {
+  const serve = makeIxServe([
+    { text: '', lastSeq: 5, timedOut: false, error: null, questions: [Q_CARD], needInput: null },
+    { text: 'r', lastSeq: 9, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const bridge = ixBridge(serve, [])
+  await bridge.handle(ixMsg('干活'))
+  await bridge.handle(ixMsg('9'))
+  assert.equal(serve.state.prompts[1].text, '9', '越界编号不得被误翻')
+})
+
+test('提问: 多选「1,3」翻译为两行选项原文', async () => {
+  const serve = makeIxServe([
+    { text: '', lastSeq: 5, timedOut: false, error: null, questions: [Q_CARD], needInput: null },
+    { text: 'r', lastSeq: 9, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const bridge = ixBridge(serve, [])
+  await bridge.handle(ixMsg('干活'))
+  await bridge.handle(ixMsg('1,3'))
+  assert.equal(serve.state.prompts[1].text, '甲\n丙')
+})
+
+test('提问: 编号只翻译一次（消费后普通数字按原样）', async () => {
+  const serve = makeIxServe([
+    { text: '', lastSeq: 5, timedOut: false, error: null, questions: [Q_CARD], needInput: null },
+    { text: 'r', lastSeq: 9, timedOut: false, error: null, questions: [], needInput: null },
+    { text: 'r', lastSeq: 12, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const bridge = ixBridge(serve, [])
+  await bridge.handle(ixMsg('干活'))
+  await bridge.handle(ixMsg('2'))
+  await bridge.handle(ixMsg('2'))
+  assert.equal(serve.state.prompts[1].text, '乙')
+  assert.equal(serve.state.prompts[2].text, '2', '第二条 2 不再被翻译（问题已消费）')
+})
+
+test('审批: needInput → 转发审批卡片并进入等待态', async () => {
+  const serve = makeIxServe([
+    {
+      text: '', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: { approvals: [{ requestId: 'r1', toolName: 'bash', input: { command: 'git reset --hard' } }] },
+    },
+  ])
+  const sent = []
+  await ixBridge(serve, sent).handle(ixMsg('执行'))
+  const body = sent.join('\n')
+  assert.match(body, /请求您的批准/)
+  assert.match(body, /bash/)
+  assert.match(body, /git reset --hard/)
+  assert.match(body, /批准.*拒绝/)
+})
+
+test('审批: 卡片带出已有正文（部分文本不丢）', async () => {
+  const serve = makeIxServe([
+    {
+      text: '我先跑个命令', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: { approvals: [{ requestId: 'r1', toolName: 'bash', input: {} }] },
+    },
+  ])
+  const sent = []
+  await ixBridge(serve, sent).handle(ixMsg('执行'))
+  assert.match(sent.join('\n'), /我先跑个命令/)
+  assert.match(sent.join('\n'), /请求您的批准/)
+})
+
+test('审批: 回复「批准」→ 提交 approve + 继续等待并送出后续文本', async () => {
+  const serve = makeIxServe([
+    {
+      text: '', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: { approvals: [{ requestId: 'r1', toolName: 'bash', input: { command: 'x' } }] },
+    },
+    { text: '执行完了', lastSeq: 12, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const sent = []
+  const bridge = ixBridge(serve, sent)
+  await bridge.handle(ixMsg('执行'))
+  await bridge.handle(ixMsg('批准'))
+  assert.equal(serve.state.answers.length, 1)
+  assert.deepEqual(serve.state.answers[0], { sessionId: 'S-IX', requestId: 'r1', decision: 'approve' })
+  assert.ok(sent.join('\n').includes('执行完了'), '批准后续收的回合文本要送出')
+})
+
+test('审批: 回复「拒绝」→ 提交 deny', async () => {
+  const serve = makeIxServe([
+    {
+      text: '', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: { approvals: [{ requestId: 'r1', toolName: 'bash', input: {} }] },
+    },
+    { text: '好，换个方式', lastSeq: 12, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const sent = []
+  const bridge = ixBridge(serve, sent)
+  await bridge.handle(ixMsg('执行'))
+  await bridge.handle(ixMsg('拒绝'))
+  assert.deepEqual(serve.state.answers[0], { sessionId: 'S-IX', requestId: 'r1', decision: 'deny' })
+  assert.ok(sent.join('\n').includes('好，换个方式'))
+})
+
+test('审批: 等待态下回复普通内容 → 只提示，不送模型、不提交', async () => {
+  const serve = makeIxServe([
+    {
+      text: '', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: { approvals: [{ requestId: 'r1', toolName: 'bash', input: {} }] },
+    },
+  ])
+  const sent = []
+  const bridge = ixBridge(serve, sent)
+  await bridge.handle(ixMsg('执行'))
+  await bridge.handle(ixMsg('你好呀'))
+  assert.equal(serve.state.answers.length, 0, '不得误提交')
+  assert.equal(serve.state.prompts.length, 1, '不得把「你好呀」送进会话')
+  assert.match(sent.join('\n'), /批准.*拒绝/, '要提示怎么作答')
+})
+
+test('审批: 多个排队 → 批准第一个后转发第二个，全部批完继续收尾', async () => {
+  const serve = makeIxServe([
+    {
+      text: '', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: {
+        approvals: [
+          { requestId: 'r1', toolName: 'bash', input: { command: 'one' } },
+          { requestId: 'r2', toolName: 'write_file', input: { path: 'x' } },
+        ],
+      },
+    },
+    { text: '都做完了', lastSeq: 20, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const sent = []
+  const bridge = ixBridge(serve, sent)
+  await bridge.handle(ixMsg('执行'))     // 卡片1
+  await bridge.handle(ixMsg('批准'))     // 批 r1 → 转发卡片2
+  await bridge.handle(ixMsg('批准'))     // 批 r2 → 继续等 → 收尾文本
+  assert.deepEqual(serve.state.answers.map((a) => a.requestId), ['r1', 'r2'])
+  assert.match(sent.join('\n'), /one/)
+  assert.match(sent.join('\n'), /write_file/)
+  assert.ok(sent.join('\n').includes('都做完了'))
+})
+
+test('审批: 提交 404（已失效）→ 清等待态并提示，后续消息走正常路径', async () => {
+  const serve = makeIxServe([
+    {
+      text: '', lastSeq: 7, timedOut: false, error: null, questions: [],
+      needInput: { approvals: [{ requestId: 'r1', toolName: 'bash', input: {} }] },
+    },
+    { text: '正常回合', lastSeq: 12, timedOut: false, error: null, questions: [], needInput: null },
+  ])
+  const sent = []
+  const bridge = ixBridge(serve, sent)
+  await bridge.handle(ixMsg('执行'))
+  serve.state.failAnswer = 'not-found'
+  await bridge.handle(ixMsg('批准'))
+  assert.match(sent.join('\n'), /失效/)
+  assert.equal(serve.state.answers.length, 0)
+  // 等待态已清：下一条普通消息正常进会话
+  await bridge.handle(ixMsg('再来一条'))
+  assert.equal(serve.state.prompts.length, 2)
+  assert.equal(serve.state.prompts[1].text, '再来一条')
+})
+
+test('parseApprovalReply: 批准/拒绝词表与边界', async () => {
+  const { parseApprovalReply } = await import('../lib/bridge.mjs')
+  assert.equal(parseApprovalReply('批准'), 'approve')
+  assert.equal(parseApprovalReply(' 同意。'), 'approve')
+  assert.equal(parseApprovalReply('OK'), 'approve')
+  assert.equal(parseApprovalReply('可以'), 'approve')
+  assert.equal(parseApprovalReply('拒绝'), 'deny')
+  assert.equal(parseApprovalReply('deny'), 'deny')
+  assert.equal(parseApprovalReply('不同意'), 'deny')
+  assert.equal(parseApprovalReply('你好'), null)
+  assert.equal(parseApprovalReply('批准了但是等一下'), null, '只认整句，不认包含')
+  assert.equal(parseApprovalReply(''), null)
+})
+
+test('formatApprovalCard: 超长命令截断并标注', async () => {
+  const { formatApprovalCard } = await import('../lib/bridge.mjs')
+  const card = formatApprovalCard({ toolName: 'bash', input: { command: 'z'.repeat(5000) } })
+  assert.match(card, /bash/)
+  assert.match(card, /截断/)
+  assert.ok(card.length < 3000, '卡片不得无界膨胀')
+})
