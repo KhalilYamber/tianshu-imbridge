@@ -147,7 +147,7 @@ test('workspace: 按编号切换 → 新建会话的 cwd 与目标工作区逐�
   const { replies, calls, map } = await runWorkspace('2')
   assert.equal(calls.created.length, 1, '应只建一个会话')
   assert.equal(calls.created[0].cwd, `${ROOT_CFG}\\coding`, 'cwd 必须落在目标工作区')
-  assert.match(calls.created[0].title, /coding/)
+  assert.equal(calls.created[0].title, undefined, '不传标题，把起名权交给宿主的自动命名')
   assert.equal(map.get('c2c:u'), 'S-1', '绑定被替换为新会话')
   assert.match(replies.join(''), /已切换到「coding」/)
   assert.match(replies.join(''), /coding/)

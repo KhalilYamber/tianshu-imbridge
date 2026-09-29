@@ -405,3 +405,71 @@ test('answerIntervention: 非 200 → answer-failed', async () => {
     (e) => e.code === 'answer-failed',
   )
 })
+
+// ── ensureTitle：标题兜底只补空，绝不覆盖 ──────────────────────
+// 宿主的自动命名是 fire-and-forget（失败即放弃），插件只做兜底补名。
+
+function mkClient(handler) {
+  const calls = []
+  const client = new ServeSessionClient({
+    token: 't',
+    port: 1,
+    fetchImpl: async (url, init) => {
+      const method = init?.method ?? 'GET'
+      calls.push(`${method} ${String(url).replace(/^http:\/\/127\.0\.0\.1:\d+/, '')}`)
+      return handler(method, init)
+    },
+  })
+  return { client, calls }
+}
+
+test('ensureTitle: 宿主已起名 → 原样保留，不发 PATCH', async () => {
+  const { client, calls } = mkClient((method) => (
+    method === 'GET' ? json({ id: 's1', title: '清理D盘垃圾' }) : json({ ok: true })
+  ))
+  assert.equal(await client.ensureTitle('s1', 'QQ: 兜底名', { retries: 0 }), 'kept')
+  assert.equal(calls.filter((c) => c.startsWith('PATCH')).length, 0, '绝不能覆盖宿主起的名字')
+})
+
+test('ensureTitle: 标题为空 → 写入兜底', async () => {
+  const { client, calls } = mkClient((method) => (
+    method === 'GET' ? json({ id: 's1', title: '' }) : json({ id: 's1', title: 'QQ: 兜底名' })
+  ))
+  assert.equal(await client.ensureTitle('s1', 'QQ: 兜底名', { retries: 0 }), 'set')
+  assert.equal(calls.filter((c) => c.startsWith('PATCH')).length, 1)
+})
+
+test('ensureTitle: 纯空白标题也算空', async () => {
+  const { client } = mkClient((method) => (
+    method === 'GET' ? json({ id: 's1', title: '   ' }) : json({ ok: true })
+  ))
+  assert.equal(await client.ensureTitle('s1', 'QQ: 兜底名', { retries: 0 }), 'set')
+})
+
+test('ensureTitle: 会话不存在 → skip，不发 PATCH', async () => {
+  const { client, calls } = mkClient(() => json({ error: 'x' }, 404))
+  assert.equal(await client.ensureTitle('s1', 'QQ: 兜底名', { retries: 0 }), 'skip')
+  assert.equal(calls.filter((c) => c.startsWith('PATCH')).length, 0)
+})
+
+test('ensureTitle: 兜底名为空 → skip，连读都不读', async () => {
+  const { client, calls } = mkClient(() => json({ id: 's1', title: '' }))
+  assert.equal(await client.ensureTitle('s1', '   '), 'skip')
+  assert.equal(calls.length, 0)
+})
+
+test('ensureTitle: 命名慢一拍 → 复查到了就不写兜底', async () => {
+  let n = 0
+  const { client, calls } = mkClient((method) => {
+    if (method !== 'GET') return json({ ok: true })
+    n += 1
+    return json(n === 1 ? { id: 's1', title: '' } : { id: 's1', title: '自动命名好了' })
+  })
+  assert.equal(await client.ensureTitle('s1', 'QQ: 兜底名', { settleMs: 1, retries: 1 }), 'kept')
+  assert.equal(calls.filter((c) => c.startsWith('PATCH')).length, 0)
+})
+
+test('renameSession: 非 200 抛 rename-failed', async () => {
+  const { client } = mkClient(() => json({ error: 'boom' }, 500))
+  await assert.rejects(() => client.renameSession('s1', 'x'), (e) => e.code === 'rename-failed')
+})
