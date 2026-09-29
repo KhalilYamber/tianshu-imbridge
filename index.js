@@ -75,6 +75,14 @@ function ensureConnection() {
         logger.info('QQ 连接在配置中被禁用（enabled=false）')
         return null
       }
+      if (!config.ownerUserOpenid) {
+        // 安全默认：未配置 owner = 全部拒收（见 lib/qq/authorization.mjs）。
+        // 这条日志是给「装了却没反应」的用户看的，必须写清原因与修复位置。
+        logger.warn(
+          '未配置 ownerUserOpenid：安全默认为「全部拒收」，任何 QQ 消息都不会被响应。'
+          + `请在该文件的 ownerUserOpenid 字段填入您的 openid 后重启天枢：${config.configFile}`,
+        )
+      }
       const { QqConnection } = await import('./lib/qq/connection.mjs')
       connection = new QqConnection({
         config,
@@ -231,11 +239,17 @@ export const tools = [
             phase: state.phase,
             mode: bridge?.mode ?? 'not-started',
             serveAvailable,
-            connection: state.connection,
+            // 实时优先：连接对象在时以它的状态机为准（state.connection 只在启动期写过一次）
+            connection: connection?.status?.state ?? state.connection,
             connectionDetail: connection?.status ?? null,
             bridgeStats: bridge?.stats ?? null,
             sessionMapSize,
             maskedAppId: state.maskedAppId,
+            security: {
+              ownerConfigured: Boolean(qqConfig?.ownerUserOpenid),
+              inboundPolicy: qqConfig?.ownerUserOpenid ? 'owner-only' : 'block-all',
+              blockedCount: connection?.status?.filteredCount ?? 0,
+            },
             configSource: state.configSource,
             configFile: state.configFile,
             inboundCount: state.inboundCount,
