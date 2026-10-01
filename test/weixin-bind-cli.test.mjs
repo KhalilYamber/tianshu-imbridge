@@ -15,13 +15,22 @@ import { createServer } from 'node:http'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
-const REPO_ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+// fileURLToPath：各平台都给目标 node 认识的原生形式（含 Windows 盘符与前导斜杠修正），
+// 并自动解码 URL 里的空格/中文（直接拿 pathname 会带着百分号编码）。
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
-/** WSL 路径 → Windows 路径（工具只在 Windows node 下跑，测试在 WSL 里发起）。 */
+/**
+ * WSL 挂载路径 → Windows 路径。**只在执行 node 是 Windows 二进制时才需要**：
+ * Linux / macOS 的 node 不认识 `D:\` 形式——对它做转换，spawn 会因 cwd 与脚本路径
+ * 都不存在而报 ENOENT（Linux CI / WSL 里跑 Linux node 时踩过）。
+ */
+const IS_WINDOWS_NODE = process.platform === 'win32'
 function toWindowsPath(mixed) {
+  if (!IS_WINDOWS_NODE) return mixed
   const match = /^\/mnt\/([a-z])\/(.*)$/i.exec(mixed)
   if (!match) return mixed
   return `${match[1].toUpperCase()}:\\${match[2].replace(/\//g, '\\')}`
@@ -69,24 +78,28 @@ test('weixin-bind: 对着假 iLink 跑完整流程 → weixin.json 落盘且 std
     enabled: true,
   }))
   try {
-    const winHome = toWindowsPath(home)
-    const winRepo = toWindowsPath(REPO_ROOT)
+    // 执行 CLI 的 node：默认为跑测试的这个（process.execPath）；可用 TIANSHU_NODE_BIN
+    // 覆盖为同平台的另一份 node。路径形态按「跑测试的 node 平台」适配。
+    const nodeBin = process.env.TIANSHU_NODE_BIN?.trim() || process.execPath
+    const nodeHome = toWindowsPath(home)
+    const nodeRepo = toWindowsPath(REPO_ROOT)
+    const bindTool = join(nodeRepo, 'tools', 'weixin-bind.mjs')
     const { stdout, stderr } = await run(
-      process.execPath,
-      [`${winRepo}/tools/weixin-bind.mjs`],
+      nodeBin,
+      [bindTool],
       {
-        cwd: winRepo,
+        cwd: nodeRepo,
         env: {
           ...process.env,
-          RIVET_HOME: winHome,
+          RIVET_HOME: nodeHome,
           WSLENV: 'RIVET_HOME',
           // 关掉对外部二维码库与真实桌面的探测，走「打印链接」分支：
           // 只清 TIANSHU_WEIXIN_QR_LIB 不够——qr.mjs 还会按 USERPROFILE/HOME 找宿主目录，
           // paths.mjs 也会拿 USERPROFILE 当桌面，把测试的假码写进主人的真桌面。
-          TIANSHU_WEIXIN_QR_LIB: `${winRepo}/node_modules/__nonexistent__`,
-          USERPROFILE: winHome,
-          HOME: winHome,
-          APPDATA: winHome,
+          TIANSHU_WEIXIN_QR_LIB: join(nodeRepo, 'node_modules', '__nonexistent__'),
+          USERPROFILE: nodeHome,
+          HOME: nodeHome,
+          APPDATA: nodeHome,
         },
         timeout: 60_000,
       },

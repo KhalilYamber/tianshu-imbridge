@@ -7,9 +7,11 @@
  * 用法：RIVET_HOME=<...> "<node.exe>" tools/entry-smoke.mjs
  * 退出码：0 = 入口加载成功且 im_status 可调用；1 = 有问题（原因打到 stderr）。
  */
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const pluginIndex = process.argv[2] ?? new URL('../index.js', import.meta.url).pathname
+// fileURLToPath 而不是裸 pathname：Windows 下 pathname 带前导斜杠（/D:/…），
+// 且含空格/中文的路径会是百分号编码——直接喂给 pathToFileURL 会二次编码而打不开。
+const pluginIndex = process.argv[2] ?? fileURLToPath(new URL('../index.js', import.meta.url))
 
 try {
   const mod = await import(pathToFileURL(pluginIndex).href)
