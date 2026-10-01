@@ -1,7 +1,7 @@
 {
   "name": "tianshu-imbridge",
-  "version": "0.4.0",
-  "description": "Tianshu IM bridge plugin — mobile QQ messages flow directly into Tianshu and replies go straight back to QQ (no DSH relay in between).",
+  "version": "0.6.0",
+  "description": "Tianshu IM bridge plugin — mobile QQ / WeChat messages flow directly into Tianshu and replies go straight back (no DSH relay in between).",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -10,17 +10,25 @@
   },
   "tianshu": {
     "name": "tianshu-imbridge",
-    "version": "0.4.0",
-    "description": "Mobile QQ <-> Tianshu direct bridge: plugin residency + QQ channel + headless call + reply routing",
+    "version": "0.6.0",
+    "description": "Mobile IM <-> Tianshu direct bridge: plugin residency + QQ & WeChat channels + agent-driven WeChat binding + headless call + reply routing",
     "entry": "index.js",
     "tools": [
       {
         "name": "im_status",
-        "description": "Report the IM bridge status: phase, process info, connection state"
+        "description": "Report the IM bridge status: phase, process info, per-channel connection state, WeChat binding progress"
       },
       {
         "name": "im_send",
-        "description": "Send a proactive QQ message to the owner (notification)"
+        "description": "Send a proactive message to the owner over QQ or WeChat (notification)"
+      },
+      {
+        "name": "weixin_bind_start",
+        "description": "Start WeChat (iLink/ClawBot) binding: puts a QR code image on the user's Desktop and waits for the scan in the background"
+      },
+      {
+        "name": "weixin_bind_status",
+        "description": "Check the WeChat binding progress and get the next step the user must do"
       }
     ],
     "permissions": {
