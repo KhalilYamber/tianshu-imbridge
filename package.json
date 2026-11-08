@@ -1,6 +1,6 @@
 {
   "name": "tianshu-imbridge",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Tianshu IM bridge plugin — mobile QQ / WeChat messages flow directly into Tianshu and replies go straight back (no DSH relay in between).",
   "license": "MIT",
   "private": true,
@@ -12,6 +12,7 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@tencent-connect/qqbot-nodejs": "1.0.4"
+    "@tencent-connect/qqbot-nodejs": "1.0.4",
+    "qrcode": "^1.5.4"
   }
 }

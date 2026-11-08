@@ -135,3 +135,12 @@ test('renderQr: 正常路径 —— 真写一个 PNG 出来（用替身渲染器
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('loadQrLibs: 插件自带的 node_modules 里的库能被找到（不依赖用户机器碰巧装过 DSH）', () => {
+  // 2026-11-08 真机故障：二维码渲染一直报「本机没有可用的 qrcode 库」。
+  // 根因不是没装库，而是探测列表只认 DSH 侧目录 / npm 全局，**不含插件自己**。
+  // 这条用例钉住：库装在本插件 node_modules 里时，裸解析必须命中。
+  const libs = loadQrLibs()
+  assert.ok(libs.qrcode, '插件自带 qrcode 时 loadQrLibs() 必须找得到')
+  assert.equal(typeof libs.qrcode.toBuffer, 'function', '拿到的必须是真的 qrcode（有 toBuffer）')
+})
