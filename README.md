@@ -56,7 +56,8 @@ flowchart LR
 
 前置要求：
 
-- 天枢桌面端（Tianshu 3.24.0；Windows 已真机验证，Linux 侧经全量测试验证）
+- 天枢桌面端 **4.0.4+**（TPI 插件接口；3.x 的 `package.json.tianshu` 清单已被宿主拒绝）
+- Node.js **>= 24.22.1**（4.0.4 运行时的安全版本门槛；天枢自带 `node-runtime/win-x64/tianshu-runtime.exe` 满足）
 - 至少一条通道的接入资格：QQ 开放平台机器人（AppID 与 AppSecret），或微信的 ClawBot 入口（微信 → 我 → 设置 → 插件）
 
 步骤：
@@ -199,8 +200,9 @@ flowchart LR
 
 ## 开发
 
-- 运行测试：`node --test`（当前 419 例；其中微信通道 119 例）。Windows 与 Linux（WSL）双平台全量通过；测试内的路径按「执行 node 的平台」自适应，不要硬编码某一平台的路径形态
-- 模块地图：`index.js`（入口，保持轻量）· `lib/bridge.mjs`（消息桥）· `lib/serve-client.mjs`（原生会话通道）· `lib/command*.mjs`（命令层）· `lib/qq/`（QQ 连接与配置）· `lib/weixin/`（微信连接与配置）· `lib/data-dir.mjs`（两通道共用的数据目录）· `test/`（单元测试）· `tools/`（e2e、探针、扫码绑定与部署同步工具）
+- 运行测试：`node --test`（当前 447 例；其中微信通道 119 例）。Windows 与 Linux（WSL）双平台全量通过；测试内的路径按「执行 node 的平台」自适应，不要硬编码某一平台的路径形态
+- 插件契约：**TPI 1.0** —— `tianshu.plugin.json`（清单，宿主据此发现插件）+ `index.js`（`defineTianshuPlugin({ id, activate })` 入口）+ `tpi.js`（SDK 垫片，宿主外调用即抛错）。工具实现在 `impl.js`，常驻态（配置 / 连接 / 桥）在 `runtime.js`；`activate()` 幂等，重复调用不会重复建连
+- 模块地图：`index.js`（TPI 入口，保持轻量）· `impl.js`（工具实现）· `runtime.js`（常驻态）· `lib/bridge.mjs`（消息桥）· `lib/serve-client.mjs`（原生会话通道）· `lib/command*.mjs`（命令层）· `lib/qq/`（QQ 连接与配置）· `lib/weixin/`（微信连接与配置）· `lib/data-dir.mjs`（两通道共用的数据目录）· `test/`（单元测试）· `tools/`（e2e、探针、扫码绑定与部署同步工具）
 - 微信扫码绑定：`"<node>" tools/weixin-bind.mjs`（需 `RIVET_HOME` 指向天枢数据目录）
 - 部署同步：`"<node>" tools/sync-deploy.mjs`（把开发位置同步到天枢插件目录并逐字节核对）
 - 设计依据与实测记录：`docs/command-mapping.md`、`docs/prior-art-survey.md`
