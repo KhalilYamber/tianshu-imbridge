@@ -3,7 +3,7 @@
   "kind": "tianshu.plugin",
   "id": "tianshu-imbridge",
   "displayName": "IM 桥接（QQ / 微信）",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "手机 QQ / 微信 ↔ 天枢直连桥：原生会话、命令层、交互转发",
   "runtime": "agent",
   "entry": "index.js",

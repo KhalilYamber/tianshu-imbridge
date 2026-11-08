@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { makeSessionMap } from './lib/session-map.mjs'
 
 export const PLUGIN_NAME = 'tianshu-imbridge'
-export const VERSION = '0.7.0'
+export const VERSION = '0.7.1'
 const TIANSHU_TIMEOUT_MS = 180_000
 
 // ── 运行状态：im_status 工具与后续模块共享 ──────────────────────
