@@ -473,3 +473,31 @@ test('renameSession: 非 200 抛 rename-failed', async () => {
   const { client } = mkClient(() => json({ error: 'boom' }, 500))
   await assert.rejects(() => client.renameSession('s1', 'x'), (e) => e.code === 'rename-failed')
 })
+
+// ── 4.0.4 兜底：终结事件缺失时按静默收尾 ──────────────────────
+// 为什么要有它：2026-11-08 实测显示 4.0.4 的运行时会话事件字符串被混淆切分，
+// 静态无法确认 turn_complete 是否仍在。serve 模式若等不到终结事件，旧逻辑会把
+// 每条消息拖到 180s 超时——静默兜底把最坏等待压到 12s，且不影响有终结事件的路径。
+
+test('无终结事件时，文本静默 12 秒视为回合结束', () => {
+  const acc = new TurnAccumulator({ graceMs: 0 })
+  acc.feed([{ seq: 1, type: 'text_delta', data: { text: '好' } }], 1000)
+  assert.equal(acc.isComplete(5000), false, '静默不足 12s 不能提前收尾')
+  assert.equal(acc.isComplete(13001), true)
+  assert.equal(acc.text(), '好')
+})
+
+test('没有任何文本时，静默不会误判完成', () => {
+  const acc = new TurnAccumulator({ graceMs: 0 })
+  assert.equal(acc.isComplete(999_999), false)
+})
+
+test('有 turn_complete 时仍按宽限期完成（兜底不改变原语义）', () => {
+  const acc = new TurnAccumulator({ graceMs: 3000 })
+  acc.feed([
+    { seq: 1, type: 'text_delta', data: { text: '好' } },
+    { seq: 2, type: 'turn_complete', data: {} },
+  ], 1000)
+  assert.equal(acc.isComplete(3500), false)
+  assert.equal(acc.isComplete(4001), true)
+})

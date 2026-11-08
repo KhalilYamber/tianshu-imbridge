@@ -343,7 +343,7 @@ test('入口: 两个绑定工具已注册且可调用（无配置的真机环境
   const prevRivet = process.env.RIVET_HOME
   try {
     process.env.RIVET_HOME = emptyHome
-    const mod = await import(`../index.js?entry=${Date.now()}`)
+    const mod = await import(`../impl.js?entry=${Date.now()}`)
     const names = mod.tools.map((t) => t.definition.name)
     assert.ok(names.includes('weixin_bind_start'), `工具清单缺 weixin_bind_start：${names.join(',')}`)
     assert.ok(names.includes('weixin_bind_status'), `工具清单缺 weixin_bind_status：${names.join(',')}`)
