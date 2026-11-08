@@ -4,7 +4,7 @@
  * 依赖全部从 runtime.js 取：入口（index.js）只负责把这里的旧契约工具
  * 翻译成 TPI 形状；真正共享的连接/桥/配置由 runtime.js 持有。
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSessionMap } from './lib/session-map.mjs'
 import {
@@ -30,6 +30,21 @@ function bindRequestFile(dataDir) {
 /** 绑定状态文件（对话侧读它判断进展）。 */
 function bindStatusFile(dataDir) {
   return join(dataDir, 'weixin-bind-status.json')
+}
+
+/**
+ * 把二维码 PNG 读成 data URL，交给宿主渲染在对话里。
+ *
+ * 任何失败都返回 null：图片是锦上添花，绝不能因为读图失败而让绑定流程报错
+ * ——退回现状（用户在桌面找那个 PNG）就好了。
+ */
+function readQrDataUrl(qrPath) {
+  if (!qrPath) return null
+  try {
+    return `data:image/png;base64,${readFileSync(qrPath).toString('base64')}`
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -222,35 +237,45 @@ export const tools = [
         if (current.state === 'running' && current.updatedAt) {
           const ageMs = Date.now() - Date.parse(current.updatedAt)
           if (Number.isFinite(ageMs) && ageMs < DEFAULT_BIND_TIMEOUT_MS) {
-            return { content: JSON.stringify({
-              alreadyRunning: true,
-              qrPath: current.qrPath,
-              step: current.step,
-              hint: '绑定已经在进行中：直接用那张二维码，扫完让我查进展即可。',
-            }, null, 2) }
+            const qrImage = readQrDataUrl(current.qrPath)
+            return {
+              content: JSON.stringify({
+                alreadyRunning: true,
+                qrPath: current.qrPath,
+                step: current.step,
+                hint: '绑定已经在进行中：直接用那张二维码，扫完让我查进展即可。',
+              }, null, 2),
+              ...(qrImage ? { images: [qrImage] } : {}),
+            }
           }
         }
         const { pid } = await spawnBinderProcess(config)
         // 给后台进程一点时间把二维码落到桌面，这样首次返回就能带上图片路径
         await new Promise((resolve) => { const t = setTimeout(resolve, 2_000); t.unref?.() })
         const after = readBindStatus(bindStatusFile(config.dataDir))
-        return { content: JSON.stringify({
-          started: true,
-          pid,
-          dataDir: config.dataDir,
-          configFile: config.configFile,
-          qrPath: after.qrPath,
-          qrOnDesktop: after.qrOnDesktop,
-          qrNote: after.qrNote,
-          step: after.step,
-          steps: [
-            after.qrPath
-              ? `打开桌面上的二维码图片（${after.qrPath}），用手机微信「扫一扫」`
-              : '等几秒后让我再查一次，二维码就绪了会给出图片位置',
-            '微信里若有提示（例如要验证码），把内容告诉我',
-            '扫完后对我说一声，我查绑定结果',
-          ],
-        }, null, 2) }
+        const qrImage = readQrDataUrl(after.qrPath)
+        return {
+          content: JSON.stringify({
+            started: true,
+            pid,
+            dataDir: config.dataDir,
+            configFile: config.configFile,
+            qrPath: after.qrPath,
+            qrOnDesktop: after.qrOnDesktop,
+            qrNote: after.qrNote,
+            step: after.step,
+            steps: [
+              qrImage
+                ? '直接扫上面这张二维码（图片已发到对话里）'
+                : (after.qrPath
+                  ? `打开桌面上的二维码图片（${after.qrPath}），用手机微信「扫一扫」`
+                  : '等几秒后让我再查一次，二维码就绪了会给出图片位置'),
+              '微信里若有提示（例如要验证码），把内容告诉我',
+              '扫完后对我说一声，我查绑定结果',
+            ],
+          }, null, 2),
+          ...(qrImage ? { images: [qrImage] } : {}),
+        }
       } catch (error) {
         return { content: `启动微信绑定失败：${error?.message ?? error}`, isError: true }
       }
@@ -279,23 +304,27 @@ export const tools = [
             : (status.state === 'need-verifycode'
               ? '服务端要验证码：把手机微信里显示的那串数字告诉我，我带着它重试。'
               : '没有正在进行的绑定。要接入微信的话，让我启动一次绑定。'))
-        return { content: JSON.stringify({
-          state: status.state,
-          step: status.step,
-          qrPath: status.qrPath,
-          qrOnDesktop: status.qrOnDesktop,
-          qrNote: status.qrNote,
-          qrUrl: status.qrUrl,
-          botId: status.botId,
-          userId: status.userId,
-          ownerFilled: status.ownerFilled,
-          reason: status.reason,
-          message: status.message,
-          updatedAt: status.updatedAt,
-          channelConfigured: Boolean(live.configured),
-          maskedToken: maskToken(live.botToken),
-          next,
-        }, null, 2) }
+        const qrImage = status.state === 'running' ? readQrDataUrl(status.qrPath) : null
+        return {
+          content: JSON.stringify({
+            state: status.state,
+            step: status.step,
+            qrPath: status.qrPath,
+            qrOnDesktop: status.qrOnDesktop,
+            qrNote: status.qrNote,
+            qrUrl: status.qrUrl,
+            botId: status.botId,
+            userId: status.userId,
+            ownerFilled: status.ownerFilled,
+            reason: status.reason,
+            message: status.message,
+            updatedAt: status.updatedAt,
+            channelConfigured: Boolean(live.configured),
+            maskedToken: maskToken(live.botToken),
+            next,
+          }, null, 2),
+          ...(qrImage ? { images: [qrImage] } : {}),
+        }
       } catch (error) {
         return { content: `查绑定状态失败：${error?.message ?? error}`, isError: true }
       }
